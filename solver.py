@@ -5,10 +5,10 @@
 
 class Node:
     def __init__(self):
-        self.up = None
-        self.down = None
-        self.right = None
-        self.left = None
+        self.up = self
+        self.down = self
+        self.right = self
+        self.left = self
 
 
 class Origin(Node):
@@ -17,24 +17,22 @@ class Origin(Node):
 
 
 class Header(Node):
-    def __init__(self, row: int, col: int, box: int, num: int):
+    def __init__(self, data):
         super().__init__()
-        self.row = row
-        self.col = col
-        self.box = box
-        self.num = num
+        self.data = []
+        for v in data:
+            self.data.append(v)
 
 
 class Constraint(Header):
-    def __init__(self, group, *data: tuple[int, ...]):
-        super().__init__(row, *data)
+    def __init__(self, group, data):
+        super().__init__(data)
         self.group = group
 
 
 class Option(Header):
-    def __init__(self, row: int, col: int, num: int):
-        box = 3 * (col // 3) + (row // 3)
-        super().__init__(row, col, box, num)
+    def __init__(self, data):
+        super().__init__(data)
 
 
 class Table:
@@ -45,44 +43,48 @@ class Table:
         self.origin.down = self.origin
         self.origin.left = self.origin
 
-    def add_constraint(self, *data):
-        head = Constraint(*data)
-        self.origin.left.right = head
-        head.left = self.origin.left
-        head.right = self.origin
-        self.origin.left = head
+    def add_constraint(self, group, data):
+        constraint = Constraint(group, data)
+        self.origin.left.right = constraint
+        constraint.left = self.origin.left
+        constraint.right = self.origin
+        self.origin.left = constraint
 
-    def add_option(self, *data):
-        head = Option(*data)
-        self.origin.up.down = head
-        head.up = self.origin.up
-        head.down = self.origin
-        self.origin.up = head
+    def add_option(self, data):
+        option = Option(data)
+        self.origin.up.down = option
+        option.up = self.origin.up
+        option.down = self.origin
+        self.origin.up = option
+        constraint = self.origin.right
+        while constraint is not self.origin:
+            self.add_cell(constraint, option)
+            constraint = constraint.right
 
-    def remove_constraint(self, head):
-        current = head
-        while current.right is not head:
+    def remove_constraint(self, constraint):
+        current = constraint
+        while current.right is not constraint:
             current.up.down = current.down
             current.down.up = current.up
             current = current.right
 
-    def remove_option(self, head):
-        current = head
-        while current.down is not head:
+    def remove_option(self, option):
+        current = option
+        while current.down is not option:
             current.right.left = current.left
             current.left.right = current.right
             current = current.down
 
-    def restore_constraint(self, head):
-        current = head
-        while current.right is not head:
+    def restore_constraint(self, constraint):
+        current = constraint
+        while current.right is not constraint:
             current.up.down = current
             current.down.up = current
             current = current.right
 
-    def restore_option(self, head):
-        current = head
-        while current.down is not head:
+    def restore_option(self, option):
+        current = option
+        while current.down is not option:
             current.right.left = current
             current.left.right = current
             current = current.down
@@ -103,30 +105,25 @@ class Sudoku:
     def __init__(self):
         self.table = Table()
 
-        groups = [
-            {"group": "cell", "row": True, "col": True, "box": False, "num": False},
-            {"group": "row", "row": True, "col": False, "box": False, "num": True},
-            {"group": "col", "row": False, "col": True, "box": False, "num": True},
-            {"group": "box", "row": False, "col": False, "box": True, "num": True},
-        ]
-
-        for group in groups:
-            data = []
-            for k, v in group.items():
-                if k == "group":
-                    data[k] = v
-                elif v
+        # bit-vectors indicating the elements that belong to each constraint group,
+        # in order: row, column, box, number.
+        groups = {"cell": "1100", "row": "1001", "col": "0101", "box": "0011"}
+        for group, vector in groups.items():
+            size = len(vector)
+            items = [i for i in range(size) if int(vector[i])]
             for i in range(9**2):
-                *n = divmod(i, 9)
-
-               CONTINUE HERE             
-                    row = group.get("row")
-                    table.add_constraint(group, row, col, num)
+                n = divmod(i, 9)
+                data = [None] * size
+                data[items[0]] = n[0]
+                data[items[1]] = n[1]
+                self.table.add_constraint(group, data)
 
         for i in range(9**2):
             row, col = divmod(i, 9)
-            for num in range(1, 9):
-                self.table.add_option(row, col, num)
+            for num in range(9):
+                box = 3 * (col // 3) + (row // 3)
+                data = [row, col, box, num]
+                self.table.add_option(data)
 
 
 Sudoku()
