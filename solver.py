@@ -11,10 +11,52 @@ class Node:
         self.left = self
 
 
+class Cell(Node):
+    def __init__(self, constraint, option):
+        super().__init__()
+        self._constraint = constraint
+        self._option = option
+
+        constraint.up.down = self
+        self.up = constraint.up
+        self.down = constraint
+        constraint.up = constraint
+        option.left.right = self
+        self.left = option.left
+        self.right = option
+        option.left = self
+
+    def remove_from_row(self):
+        self.up.down = self.down
+        self.down.up = self.up
+
+    def remove_from_col(self):
+        self.right.left = self.left
+        self.left.right = self.right
+
+    def restore_2_row(self):
+        self.up.down = self
+        self.down.up = self
+
+    def restore_2_col(self):
+        self.right.left = self
+        self.left.right = self
+
+    @property
+    def constraint(self):
+        return self._constraint
+
+    @property
+    def option(self):
+        return self._option
+
+    def __str__(self):
+        return "{}: {}".format(self._option, self._constraint)
+
+
 class Origin(Node):
     def __init__(self):
         super().__init__()
-    
 
 
 class Header(Node):
@@ -22,79 +64,138 @@ class Header(Node):
         super().__init__()
         self.data = data
         self.set = set({(k, v) for k, v in data.items() if v is not None})
-    
+
     def __str__(self):
         return "{{{}}}".format(", ".join([f"{k}: {v}" for k, v in self.data.items()]))
 
+
 class Constraint(Header):
-    index = 0
-    def __init__(self, group, data):
+    count = 0
+
+    def __init__(self, origin, group, data):
+        Constraint.count += 1
         super().__init__(data)
         self.group = group
-        self.index = Constraint.index
-        Constraint.index += 1
+
+        origin.left.right = self
+        self.left = origin.left
+        self.right = origin
+        origin.left = self
 
     def __str__(self):
         data = super().__str__()
-        return "{} ({}) = {}".format("Constraint", self.group, data) 
+        return "{} ({}) = {}".format("Constraint", self.group, data)
+
+    def remove(self):
+        Constraint.count -= 1
+        current = self
+        keep_going = True
+        while keep_going:
+            current.remove_from_col()
+            current = current.down
+            keep_going = current is not self
+
+    def restore(self):
+        Constraint.count += 1
+        current = self
+        keep_going = True
+        while keep_going:
+            current.restore_2_col()
+            current = current.down
+            keep_going = current is not self
+
 
 class Option(Header):
-    index = 0
-    def __init__(self, data):
+    count = 0
+
+    def __init__(self, origin, data):
+        Option.count += 1
         super().__init__(data)
-        self.index = Option.index
-        Option.index += 1
+
+        origin.up.down = self
+        self.up = origin.up
+        self.down = origin
+        origin.up = self
 
     def __str__(self):
         return "r{}c{}={}".format(*[self.data.get(v) for v in ["row", "col", "num"]])
 
+    def remove(self):
+        Option.count -= 1
+        current = self
+        keep_going = True
+        while keep_going:
+            current.remove_from_row()
+            current = current.right
+            keep_going = current is not cell
+
+    def restore(self):
+        Option.count += 1
+        current = self
+        keep_going = True
+        while keep_going:
+            current.restore_2_row()
+            current = current.right
+            keep_going = current is not self
+
 
 class Table:
     def __init__(self):
-        self.origin = Origin()
-        self.origin.up = self.origin
-        self.origin.right = self.origin
-        self.origin.down = self.origin
-        self.origin.left = self.origin
-        self.options = {}
-        self.givens = []
+        self._origin = Origin()
+
+        self._given = []  # list containing options
+        self._solution = []  # list containing options
+        self._removed = []  # list containing options and constraints
+        self._options = {}  # dictionary for option look-up by (row, col, num)
 
     def __str__(self):
+        intro = (
+            "This is an exact cover matrix for the game Sudoku. The rows\n"
+            "represent every possible candidate placement, while the columns \n"
+            "represent the constraints derived from the rules of Sudoku.\n"
+            "There are 9x9x9=729 possible candidates and 9x9x4=324 constraints.\n"
+            "The occupied cells indicate where the candidates and constraints\n"
+            "intersect, the numbers displayed are simply the corresponding\n"
+            "candidate numbers for ease of reading.\n"
+        )
         elements = ["row", "col", "box", "num"]
         lhs_width = 7
-        intro = ("This is an exact cover matrix for the game Sudoku. The rows\n"
-                "represent every possible candidate placement, while the columns \n"
-                "represent the constraints derived from the rules of Sudoku.\n"
-                "There are 9x9x9=729 possible candidates and 9x9x4=324 constraints.\n"
-                "The occupied cells indicate where the candidates and constraints\n"
-                "intersect, the numbers displayed are simply the corresponding\n"
-                "candidate numbers for ease of reading.\n")
-        header = ["{:{}}".format(f"{lhs:5s}:", lhs_width) for lhs in ["GROUP"] + elements]
+        header = [
+            "{:{}}".format(f"{lhs:5s}:", lhs_width) for lhs in ["GROUP"] + elements
+        ]
         sep_index = [lhs_width]
-        constraint = self.origin.right
-        while constraint is not self.origin:
-            if constraint.left == self.origin or constraint.left.group != constraint.group:
+        constraint = self._origin.right
+        while constraint is not self._origin:
+            if (
+                constraint.left == self._origin
+                or constraint.left.group != constraint.group
+            ):
                 header = [v + "|" for v in header]
                 header[0] += constraint.group.upper()
             for i, v in enumerate(elements, start=1):
                 val = constraint.data.get(v)
                 header[i] += " " if val is None else str(val)
-            if constraint.right == self.origin or constraint.right.group != constraint.group:
+            if (
+                constraint.right == self._origin
+                or constraint.right.group != constraint.group
+            ):
                 sep_index.append(len(header[1]))
                 header[0] += " " * (len(header[1]) - len(header[0]))
             constraint = constraint.right
 
-        sep_line = "".join(["+" if i in sep_index else "-" for i in range(sep_index[-1])])
+        sep_line = "".join(
+            ["+" if i in sep_index else "-" for i in range(sep_index[-1])]
+        )
         table = []
-        option = self.origin.down
-        while option is not self.origin:
+        option = self._origin.down
+        while option is not self._origin:
             num = option.data.get("num")
             if num == 1:
                 table.append(f"{sep_line}")
             lhs = f"{str(option):{lhs_width}s}"
             table.append(lhs)
-            constraint = self.origin.right
-            while constraint is not self.origin:
+            constraint = self._origin.right
+            while constraint is not self._origin:
                 if len(table[-1]) in sep_index:
                     table[-1] += "|"
                 table[-1] += str(num) if constraint.set.issubset(option.set) else " "
@@ -102,69 +203,24 @@ class Table:
             option = option.down
         return "\n".join([v for v in [intro] + header + table])
 
-    def add_constraint(self, group, data):
-        constraint = Constraint(group, data)
-        self.origin.left.right = constraint
-        constraint.left = self.origin.left
-        constraint.right = self.origin
-        self.origin.left = constraint
+    def define_constraint(self, group, data):
+        Constraint(self._origin, group, data)
 
-    def add_option(self, data):
-        # This function depends on all constraints being added first!
-        option = Option(data)
-        self.origin.up.down = option
-        option.up = self.origin.up
-        option.down = self.origin
-        self.origin.up = option
-        constraint = self.origin.right
-        while constraint is not self.origin:
+    def define_option(self, data):
+        # This function depends on all constraints being defined first!
+        option = Option(self._origin, data)
+        constraint = self._origin.right
+        while constraint is not self._origin:
             if constraint.set.issubset(option.set):
-                self.add_cell(constraint, option)
+                Cell(constraint, option)
             constraint = constraint.right
-        # box unnecessary for look-up
-        self.options[tuple([data.get(v) for v in ["row", "col", "num"]])] = option
+        self._options[tuple([data.get(v) for v in ["row", "col", "num"]])] = option
 
-    def remove_constraint(self, constraint):
-        current = constraint
-        while current.right is not constraint:
-            current.up.down = current.down
-            current.down.up = current.up
-            current = current.right
+    def define_given(self, *ref):
+        self._given.append(self._options[tuple(ref)])
 
-    def remove_option(self, option):
-        current = option
-        while current.down is not option:
-            current.right.left = current.left
-            current.left.right = current.right
-            current = current.down
-
-    def restore_constraint(self, constraint):
-        current = constraint
-        while current.right is not constraint:
-            current.up.down = current
-            current.down.up = current
-            current = current.right
-
-    def restore_option(self, option):
-        current = option
-        while current.down is not option:
-            current.right.left = current
-            current.left.right = current
-            current = current.down
-
-    def add_cell(self, constraint, option):
-        cell = Node()
-        constraint.up.down = cell
-        cell.up = constraint.up
-        cell.down = constraint
-        constraint.up = constraint
-        option.left.right = cell
-        cell.left = option.left
-        cell.right = option
-        option.left = cell
-
-    def add_given(self, *ref):
-        self.givens.append(self.options[tuple(ref)])
+    def algo_x(self):
+        pass
 
 
 class Sudoku:
@@ -183,21 +239,23 @@ class Sudoku:
                 data = [None] * size
                 data[items[0]] = n[0]
                 data[items[1]] = n[1]
-                self.table.add_constraint(group, {k: v for k, v in zip(elements, data)})
+                self.table.define_constraint(
+                    group, {k: v for k, v in zip(elements, data)}
+                )
 
         for i in range(9**2):
             d = {}
             d["row"], d["col"] = divmod(i, 9)
             for d["num"] in range(9):
                 d["box"] = 3 * (d.get("col") // 3) + (d.get("row") // 3)
-                data = {k: v + 1 for k, v in d.items()} 
-                self.table.add_option(data)
+                data = {k: v + 1 for k, v in d.items()}
+                self.table.define_option(data)
 
     def solve(self, puzzle):
         for row, arr in enumerate(puzzle, start=1):
             for col, num in enumerate(arr, start=1):
                 if num:
-                    self.table.add_given(row, col, num)
+                    self.table.define_given(row, col, num)
 
         with open("DLX.txt", "w") as DLX:
             DLX.write(f"{self.table}")
