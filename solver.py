@@ -5,14 +5,54 @@
 
 class Node:
     def __init__(self):
-        self.up = self
-        self.down = self
-        self.right = self
-        self.left = self
+        self._up = self
+        self._down = self
+        self._right = self
+        self._left = self
 
+    def validate(func):
+        def wrap(self, value):
+            if not isinstance(value, Node):
+                raise ValueError("Must be instance of Node class.")
+            func(self, value)
+        return wrap
+
+    @property
+    def up(self):
+        return self._up
+    @property
+    def down(self):
+        return self._down
+    @property
+    def right(self):
+        return self._right
+    @property
+    def left(self):
+        return self._left
+
+    @up.setter
+    @validate
+    def up(self, node):
+        self._up = node
+
+    @down.setter
+    @validate
+    def down(self, node):
+        self._down = node
+    
+    @right.setter
+    @validate
+    def right(self, node):
+        self._right = node
+
+    @left.setter
+    @validate
+    def left(self, node):
+        self._left = node
 
 class Cell(Node):
     def __init__(self, constraint, option):
+        constraint.candidates += 1
         super().__init__()
         self._constraint = constraint
         self._option = option
@@ -27,6 +67,7 @@ class Cell(Node):
         option.left = self
 
     def remove_from_row(self):
+        constraint.candidates -= 1
         self.up.down = self.down
         self.down.up = self.up
 
@@ -35,6 +76,7 @@ class Cell(Node):
         self.left.right = self.right
 
     def restore_2_row(self):
+        constraint.candidates += 1
         self.up.down = self
         self.down.up = self
 
@@ -69,13 +111,27 @@ class Header(Node):
         return "{{{}}}".format(", ".join([f"{k}: {v}" for k, v in self.data.items()]))
 
 
+def increment(func):
+    def wrap(self, *args, **kwargs):
+        self.__class__.count += 1
+        return func(self, *args, **kwargs)
+    return wrap
+
+def decrement(func):
+    def wrap(self, *args, **kwargs):
+        self.__class__.count -= 1
+        return func(self, *args, **kwargs)
+    return wrap
+
+
 class Constraint(Header):
     count = 0
 
+    @increment
     def __init__(self, origin, group, data):
-        Constraint.count += 1
         super().__init__(data)
-        self.group = group
+        self._group = group
+        self._candidates = 0
 
         origin.left.right = self
         self.left = origin.left
@@ -86,8 +142,20 @@ class Constraint(Header):
         data = super().__str__()
         return "{} ({}) = {}".format("Constraint", self.group, data)
 
+    @property
+    def group(self):
+        return self._group
+
+    @property
+    def candidates(self):
+        return self._candidates
+   
+    @candidates.setter
+    def candidates(self, n):
+        self._candidates = n
+
+    @decrement
     def remove(self):
-        Constraint.count -= 1
         current = self
         keep_going = True
         while keep_going:
@@ -95,8 +163,8 @@ class Constraint(Header):
             current = current.down
             keep_going = current is not self
 
+    @increment
     def restore(self):
-        Constraint.count += 1
         current = self
         keep_going = True
         while keep_going:
@@ -108,8 +176,8 @@ class Constraint(Header):
 class Option(Header):
     count = 0
 
+    @increment
     def __init__(self, origin, data):
-        Option.count += 1
         super().__init__(data)
 
         origin.up.down = self
@@ -120,8 +188,8 @@ class Option(Header):
     def __str__(self):
         return "r{}c{}={}".format(*[self.data.get(v) for v in ["row", "col", "num"]])
 
+    @decrement
     def remove(self):
-        Option.count -= 1
         current = self
         keep_going = True
         while keep_going:
@@ -129,8 +197,8 @@ class Option(Header):
             current = current.right
             keep_going = current is not cell
 
+    @increment
     def restore(self):
-        Option.count += 1
         current = self
         keep_going = True
         while keep_going:
@@ -163,6 +231,7 @@ class Table:
         header = [
             "{:{}}".format(f"{lhs:5s}:", lhs_width) for lhs in ["GROUP"] + elements
         ]
+        candidates = "{:{}}".format(f"{'cand':5s}:", lhs_width)
         sep_index = [lhs_width]
         constraint = self._origin.right
         while constraint is not self._origin:
@@ -172,6 +241,8 @@ class Table:
             ):
                 header = [v + "|" for v in header]
                 header[0] += constraint.group.upper()
+                candidates += "|"
+            candidates += str(constraint.candidates)
             for i, v in enumerate(elements, start=1):
                 val = constraint.data.get(v)
                 header[i] += " " if val is None else str(val)
@@ -186,6 +257,7 @@ class Table:
         sep_line = "".join(
             ["+" if i in sep_index else "-" for i in range(sep_index[-1])]
         )
+        candidates = "\n".join([sep_line, candidates])
         table = []
         option = self._origin.down
         while option is not self._origin:
@@ -201,7 +273,7 @@ class Table:
                 table[-1] += str(num) if constraint.set.issubset(option.set) else " "
                 constraint = constraint.right
             option = option.down
-        return "\n".join([v for v in [intro] + header + table])
+        return "\n".join([v for v in [intro] + header + [candidates] + table])
 
     def define_constraint(self, group, data):
         Constraint(self._origin, group, data)
@@ -259,8 +331,7 @@ class Sudoku:
 
         with open("DLX.txt", "w") as DLX:
             DLX.write(f"{self.table}")
-
-
+    
 sudoku = Sudoku()
 
 puzzle = [
