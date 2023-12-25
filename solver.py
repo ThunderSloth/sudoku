@@ -10,13 +10,6 @@ class Node:
         self._right = self
         self._left = self
 
-    def validate(func):
-        def wrap(self, value):
-            if not isinstance(value, Node):
-                raise ValueError("Must be instance of Node class.")
-            func(self, value)
-        return wrap
-
     @property
     def up(self):
         return self._up
@@ -31,30 +24,26 @@ class Node:
         return self._left
 
     @up.setter
-    @validate
     def up(self, node):
         self._up = node
 
     @down.setter
-    @validate
     def down(self, node):
         self._down = node
     
     @right.setter
-    @validate
     def right(self, node):
         self._right = node
 
     @left.setter
-    @validate
     def left(self, node):
         self._left = node
 
 class Cell(Node):
     def __init__(self, constraint, option):
-        constraint.candidates += 1
         super().__init__()
         self._constraint = constraint
+        self._constraint.candidates += 1
         self._option = option
 
         constraint.up.down = self
@@ -67,7 +56,7 @@ class Cell(Node):
         option.left = self
 
     def remove_from_row(self):
-        constraint.candidates -= 1
+        self._constraint.candidates -= 1
         self.up.down = self.down
         self.down.up = self.up
 
@@ -76,7 +65,7 @@ class Cell(Node):
         self.left.right = self.right
 
     def restore_2_row(self):
-        constraint.candidates += 1
+        self._constraint.candidates += 1
         self.up.down = self
         self.down.up = self
 
@@ -195,7 +184,7 @@ class Option(Header):
         while keep_going:
             current.remove_from_row()
             current = current.right
-            keep_going = current is not cell
+            keep_going = current is not self
 
     @increment
     def restore(self):
@@ -275,6 +264,7 @@ class Table:
             option = option.down
         return "\n".join([v for v in [intro] + header + [candidates] + table])
 
+
     def define_constraint(self, group, data):
         Constraint(self._origin, group, data)
 
@@ -292,7 +282,28 @@ class Table:
         self._given.append(self._options[tuple(ref)])
 
     def algo_x(self):
-        pass
+        # If the matrix A has no columns, the current partial solution is a valid solution; terminate successfully.
+        column = self._origin.right 
+        if column.count == 0:
+            return
+        #Otherwise choose a column c (deterministically).
+        least = column.candidates
+        curr = column
+        while curr is not self._origin:
+            if least > curr.candidates:
+                least = curr.candidates
+                column = curr
+            curr = curr.right
+        #Choose a row r such that Ar, c = 1 (nondeterministically).
+        cell = column.down
+        row = cell.option
+        #Include row r in the partial solution.
+        self._solution.append(row)
+        #For each column j such that Ar, j = 1,
+            #for each row i such that Ai, j = 1,
+                #delete row i from matrix A.
+            #delete column j from matrix A.
+        #Repeat this algorithm recursively on the reduced matrix A.)
 
 
 class Sudoku:
@@ -331,6 +342,7 @@ class Sudoku:
 
         with open("DLX.txt", "w") as DLX:
             DLX.write(f"{self.table}")
+        self.table.algo_x()         
     
 sudoku = Sudoku()
 
